@@ -11,20 +11,22 @@ describe("MemoryMcpServer", () => {
   let server: MemoryMcpServer;
   let tempDir: string;
   let workspaceDir: string;
+  let defaultUserDir: string;
 
   beforeEach(() => {
     // Create temp directories
     tempDir = path.join(process.cwd(), ".test-mcp-data");
     workspaceDir = path.join(tempDir, `workspace-${Date.now()}`);
+    defaultUserDir = path.join(workspaceDir, "users", "default");
 
     if (!fs.existsSync(tempDir)) {
       fs.mkdirSync(tempDir, { recursive: true });
     }
-    fs.mkdirSync(workspaceDir, { recursive: true });
+    fs.mkdirSync(defaultUserDir, { recursive: true });
 
-    // Create MEMORY.md
+    // Create MEMORY.md in the default user's workspace
     fs.writeFileSync(
-      path.join(workspaceDir, "MEMORY.md"),
+      path.join(defaultUserDir, "MEMORY.md"),
       "# Test Memory\n\nTest content"
     );
 
@@ -68,16 +70,16 @@ describe("MemoryMcpServer", () => {
       expect(result.content[0].text).toContain("success");
       expect(result.content[0].text).toContain("memory/test.md");
 
-      // Verify file was created
-      const filePath = path.join(workspaceDir, "memory/test.md");
+      // Verify file was created in the default user's workspace
+      const filePath = path.join(defaultUserDir, "memory/test.md");
       expect(fs.existsSync(filePath)).toBe(true);
       const content = fs.readFileSync(filePath, "utf-8");
       expect(content).toBe("# Test File\n\nTest content");
     });
 
     test("updates existing file", async () => {
-      // Create file first
-      const memoryDir = path.join(workspaceDir, "memory");
+      // Create file first in the default user's workspace
+      const memoryDir = path.join(defaultUserDir, "memory");
       fs.mkdirSync(memoryDir, { recursive: true });
       fs.writeFileSync(
         path.join(memoryDir, "existing.md"),
@@ -109,8 +111,8 @@ describe("MemoryMcpServer", () => {
 
       expect(result.isError).toBeUndefined();
 
-      // Verify nested directories were created
-      const filePath = path.join(workspaceDir, "memory/nested/deep/file.md");
+      // Verify nested directories were created in the default user's workspace
+      const filePath = path.join(defaultUserDir, "memory/nested/deep/file.md");
       expect(fs.existsSync(filePath)).toBe(true);
     });
 
@@ -170,8 +172,8 @@ describe("MemoryMcpServer", () => {
 
   describe("handleMemoryDelete", () => {
     test("deletes existing file", async () => {
-      // Create file first
-      const memoryDir = path.join(workspaceDir, "memory");
+      // Create file first in the default user's workspace
+      const memoryDir = path.join(defaultUserDir, "memory");
       fs.mkdirSync(memoryDir, { recursive: true });
       const filePath = path.join(memoryDir, "temp.md");
       fs.writeFileSync(filePath, "Temporary content");
@@ -198,8 +200,8 @@ describe("MemoryMcpServer", () => {
       expect(result.content[0].text).toContain("Cannot delete MEMORY.md");
       expect(result.content[0].text).toContain("protected");
 
-      // Verify MEMORY.md still exists
-      expect(fs.existsSync(path.join(workspaceDir, "MEMORY.md"))).toBe(true);
+      // Verify MEMORY.md still exists in the default user's workspace
+      expect(fs.existsSync(path.join(defaultUserDir, "MEMORY.md"))).toBe(true);
     });
 
     test("rejects path traversal attacks", async () => {
@@ -242,8 +244,8 @@ describe("MemoryMcpServer", () => {
     });
 
     test("reads with line range", async () => {
-      // Create file with multiple lines
-      const memoryDir = path.join(workspaceDir, "memory");
+      // Create file with multiple lines in the default user's workspace
+      const memoryDir = path.join(defaultUserDir, "memory");
       fs.mkdirSync(memoryDir, { recursive: true });
       fs.writeFileSync(
         path.join(memoryDir, "multiline.md"),

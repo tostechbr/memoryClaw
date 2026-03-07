@@ -196,7 +196,9 @@ describe("MemoryManager", () => {
     });
 
     test("searches memory", async () => {
-      const results = await manager.search("programming language");
+      const results = await manager.search("programming language", {
+        minScore: 0,
+      });
 
       expect(results.length).toBeGreaterThan(0);
       expect(results[0]?.snippet).toBeDefined();

@@ -31,17 +31,22 @@ Akashic Context is an open-source library that adds **persistent memory** and **
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Current Status: Phase 1 - Memory Search
+## Current Status: Phase 1 - Memory Search ✅ + Sprint 0 Next
 
 **What works today:**
 - Store memories in Markdown files (human-readable, git-friendly)
 - Search using BM25 keyword matching
-- Integrate via MCP Protocol (n8n, Claude Desktop, Cursor)
+- Full CRUD via MCP Protocol (search, get, store, delete)
 - Chunk large files for better search results
+- 140 tests passing (unit + integration + QA)
 
-**Coming in Phase 2:** Context management (compaction, memory flush, pruning)
+**⚠️ Current limitation:** No multi-user isolation. All users share the same workspace. **Sprint 0 (next)** will add `userId` parameter to all tools for per-user memory isolation.
 
-**Coming in Phase 3:** Session lifecycle, token metrics, automatic triggers
+**Coming in Sprint 0:** Multi-user isolation (userId per tool, per-user database)
+
+**Coming in Phase 2:** Vector search (sqlite-vec, hybrid merge)
+
+**Coming in Phase 3:** Context management (compaction, memory flush, pruning)
 
 ## Quick Start with n8n
 
@@ -250,13 +255,14 @@ Open the workflow chat interface and ask:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  AI Agent (Claude, GPT, etc.)                               │
+│  AI Agent (Claude, GPT, etc.) + userId                      │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  MCP Server (stdio)                                         │
-│  Tools: memory_search, memory_get                           │
+│  Tools: memory_search, memory_get, memory_store, memory_del │
+│  + userId param → per-user isolation (Sprint 0 - planned)   │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -272,8 +278,9 @@ Open the workflow chat interface and ask:
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  Memory Files (Markdown)                                    │
-│  MEMORY.md + memory/*.md                                    │
+│  Memory Files (per user - planned)                          │
+│  users/{userId}/MEMORY.md + memory/*.md                     │
+│  users/{userId}/memory.db                                   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -288,10 +295,23 @@ Open the workflow chat interface and ask:
 | SQLite + FTS5 | ✅ Done | Keyword indexing |
 | BM25 Search | ✅ Done | Keyword matching |
 | Embedding Cache | ✅ Done | Hash-based deduplication |
-| MCP Server | ✅ Done | stdio transport |
+| MCP Server | ✅ Done | stdio transport, 4 tools (search, get, store, delete) |
 | n8n Integration | ✅ Done | Works with AI Agent node |
+| Integration Tests | ✅ Done | 15 end-to-end tests |
+| QA Scenarios | ✅ Done | 17 assertions, 4 real-user scenarios |
 
-### Phase 1.5: Memory Foundation 📋 Next
+### Sprint 0: Multi-User Isolation 🎯 Next
+
+| Feature | Status | Description |
+|---------|--------|-------------|
+| userId Parameter | 🎯 Planned | Add userId to all 4 MCP tools |
+| Per-User Workspace | 🎯 Planned | `users/{userId}/MEMORY.md + memory/*.md` |
+| Per-User Database | 🎯 Planned | `users/{userId}/memory.db` — total isolation |
+| Manager Pool | 🎯 Planned | LRU pool of MemoryManagers per userId |
+| Backward Compat | 🎯 Planned | No userId → defaults to `"default"` user |
+| WhatsApp Workflow | 🎯 Planned | n8n example with phone as userId |
+
+### Phase 1.5: Memory Foundation 📋 After Sprint 0
 
 | Feature | Status | Description |
 |---------|--------|-------------|
@@ -299,7 +319,6 @@ Open the workflow chat interface and ask:
 | Vector Search | 📋 Planned | Cosine similarity search |
 | Hybrid Merge | 📋 Planned | 70% vector + 30% keyword |
 | Embedding Batch API | 📋 Planned | OpenAI Batch (50% cheaper) |
-| Multi-Agent Isolation | 📋 Planned | Separate DB per agent |
 
 ### Phase 2: Context Management 🚧 Planned
 
@@ -331,9 +350,12 @@ Search your memories using keyword matching.
 {
   "query": "project status",
   "maxResults": 5,
-  "minScore": 0
+  "minScore": 0,
+  "userId": "user_123"
 }
 ```
+
+> **Note:** `userId` will be added in Sprint 0. Currently all tools operate on a single shared workspace.
 
 ### `memory_get`
 
@@ -343,7 +365,31 @@ Read specific lines from a memory file.
 {
   "path": "memory/projects.md",
   "from": 1,
-  "lines": 20
+  "lines": 20,
+  "userId": "user_123"
+}
+```
+
+### `memory_store`
+
+Create or update a memory file.
+
+```json
+{
+  "path": "memory/profile.md",
+  "content": "# Profile\nName: Maria\nCompany: TechCorp",
+  "userId": "user_123"
+}
+```
+
+### `memory_delete`
+
+Delete a memory file.
+
+```json
+{
+  "path": "memory/old-notes.md",
+  "userId": "user_123"
 }
 ```
 
@@ -374,7 +420,8 @@ See [Testing Guide](./docs/TESTING.md) and [Architecture](./docs/ARCHITECTURE.md
 
 | Limitation | Reason | Planned Solution |
 |------------|--------|------------------|
-| Keyword search only | sqlite-vec not loaded | Phase 2: Vector search |
+| **No multi-user isolation** | **No userId parameter** | **Sprint 0: Per-user workspace + database** |
+| Keyword search only | sqlite-vec not loaded | Phase 1.5: Vector search |
 | No compaction | Not implemented yet | Phase 2: Compaction |
 | Local n8n only | MCP uses stdio | Phase 3: HTTP adapter |
 | No token metrics | Not implemented yet | Phase 2: Token counting |
@@ -383,10 +430,11 @@ See [Testing Guide](./docs/TESTING.md) and [Architecture](./docs/ARCHITECTURE.md
 
 Contributions are welcome! We especially need help with:
 
-- **Phase 2 features**: Vector search, compaction, token counting
-- **Testing**: Mathematical validation of context management
+- **Sprint 0**: Multi-user isolation (userId per tool, per-user database)
+- **Phase 1.5 features**: Vector search, hybrid merge
+- **Testing**: Integration tests, multi-user isolation tests
 - **Documentation**: Usage guides and examples
-- **Integrations**: Claude Desktop, Cursor testing
+- **Integrations**: Claude Desktop, Cursor, WhatsApp workflows
 
 ### How to Contribute
 

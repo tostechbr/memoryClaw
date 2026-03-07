@@ -37,7 +37,7 @@ test-data/
 .turbo/
 
 # Test workspaces (exclude root test-workspace, keep examples/test-workspace)
-# /test-workspace/
+/test-workspace/
 /test-workspace-mcp/
 /docs/moltbot-reference/
 

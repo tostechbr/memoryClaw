@@ -84,8 +84,9 @@ export class MemoryStorage {
 
   constructor(config: StorageConfig) {
     const sessionPart = config.sessionId ? `_${config.sessionId}` : "";
-    const dbName = `memory_${config.userId}${sessionPart}.db`;
-    this.dbPath = path.join(ensureDir(config.dataDir), dbName);
+    const dbName = `memory${sessionPart}.db`;
+    const userDir = path.join(config.dataDir, "users", config.userId);
+    this.dbPath = path.join(ensureDir(userDir), dbName);
     this.db = new Database(this.dbPath);
     this.db.pragma("journal_mode = WAL");
     this.initSchema();
@@ -330,6 +331,15 @@ export class MemoryStorage {
    */
   deleteFile(filePath: string): void {
     this.db.prepare("DELETE FROM files WHERE path = ?").run(filePath);
+  }
+
+  /**
+   * Get all indexed file paths
+   */
+  getAllFilePaths(): string[] {
+    const stmt = this.db.prepare("SELECT path FROM files");
+    const rows = stmt.all() as Array<{ path: string }>;
+    return rows.map((r) => r.path);
   }
 
   /**

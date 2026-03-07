@@ -11,6 +11,8 @@ import {
   type EmbeddingProvider
 } from "akashic-context";
 import { z } from "zod";
+import fs from "node:fs/promises";
+import path from "node:path";
 
 /**
  * Configuration for the MCP Server
@@ -36,36 +38,21 @@ export interface McpServerConfig {
 /**
  * MCP Server for Akashic Context
  * Exposes memory search and retrieval tools via Model Context Protocol
+ * Supports per-user isolation via optional userId parameter on all tools.
  */
 export class MemoryMcpServer {
   private server: Server;
-  private manager: MemoryManager;
+  private managers = new Map<string, MemoryManager>();
   private workspaceDir: string;
+  private dataDir: string;
+  private embeddingConfig?: McpServerConfig["embedding"];
+  private hybridWeights?: McpServerConfig["hybridWeights"];
 
   constructor(config: McpServerConfig) {
     this.workspaceDir = config.workspaceDir;
-    // Initialize Memory Manager
-    const dataDir = config.dbPath ? config.dbPath.replace(/\/[^/]+$/, '') : "./data";
-    this.manager = new MemoryManager({
-      dataDir,
-      userId: "mcp-user",
-      workspaceDir: config.workspaceDir,
-      memory: {
-        enabled: true,
-        provider: config.embedding?.provider || "openai",
-        model: config.embedding?.model || "text-embedding-3-small",
-        chunkSize: 400,
-        chunkOverlap: 80,
-        vectorWeight: config.hybridWeights?.vector || 0.7,
-        textWeight: config.hybridWeights?.text || 0.3,
-        minScore: 0.35,
-      },
-    });
-
-    // Configure embedding provider if specified
-    if (config.embedding) {
-      this.setupEmbeddingProvider(config.embedding);
-    }
+    this.dataDir = config.dbPath ? config.dbPath.replace(/\/[^/]+$/, "") : "./data";
+    this.embeddingConfig = config.embedding;
+    this.hybridWeights = config.hybridWeights;
 
     // Initialize MCP Server
     this.server = new Server(
@@ -84,18 +71,85 @@ export class MemoryMcpServer {
   }
 
   /**
-   * Setup embedding provider based on config
+   * Sanitize userId to safe filesystem characters, preventing path traversal.
+   * Returns a string safe to use as a directory name.
    */
-  private setupEmbeddingProvider(config: McpServerConfig["embedding"]): void {
+  private sanitizeUserId(userId: string): string {
+    return userId.replace(/[^a-zA-Z0-9_\-.:+@]/g, "_");
+  }
+
+  /**
+   * Return the absolute workspace directory for a given userId.
+   */
+  private getUserWorkspaceDir(userId: string): string {
+    const safe = this.sanitizeUserId(userId);
+    return path.join(this.workspaceDir, "users", safe);
+  }
+
+  /**
+   * Lazily create and cache a MemoryManager for the given userId.
+   * On first call: creates the user directory, bootstraps MEMORY.md if absent,
+   * configures the embedding provider, and runs an initial sync.
+   */
+  private async getOrCreateManager(rawUserId: string): Promise<MemoryManager> {
+    const userId = this.sanitizeUserId(rawUserId);
+
+    const existing = this.managers.get(userId);
+    if (existing) return existing;
+
+    const userWorkspaceDir = path.join(this.workspaceDir, "users", userId);
+    await fs.mkdir(userWorkspaceDir, { recursive: true });
+
+    // Bootstrap MEMORY.md only if it doesn't already exist
+    const memoryFile = path.join(userWorkspaceDir, "MEMORY.md");
+    try {
+      await fs.access(memoryFile);
+    } catch {
+      await fs.writeFile(memoryFile, `# Memory\n\nUser: ${userId}\n`, "utf-8");
+    }
+
+    const manager = new MemoryManager({
+      dataDir: this.dataDir,
+      userId,
+      workspaceDir: userWorkspaceDir,
+      memory: {
+        enabled: true,
+        provider: this.embeddingConfig?.provider || "openai",
+        model: this.embeddingConfig?.model || "text-embedding-3-small",
+        chunkSize: 400,
+        chunkOverlap: 80,
+        vectorWeight: this.hybridWeights?.vector ?? 0.7,
+        textWeight: this.hybridWeights?.text ?? 0.3,
+        minScore: 0.15,
+      },
+    });
+
+    if (this.embeddingConfig) {
+      this.setupEmbeddingProvider(manager, this.embeddingConfig);
+    }
+
+    // Initial sync to index any pre-existing files
+    try {
+      await manager.sync();
+    } catch (error) {
+      console.error(`[MCP] Warning: Initial sync failed for user ${userId}:`, error);
+    }
+
+    this.managers.set(userId, manager);
+    return manager;
+  }
+
+  /**
+   * Configure an embedding provider on a specific manager instance.
+   */
+  private setupEmbeddingProvider(manager: MemoryManager, config: McpServerConfig["embedding"]): void {
     if (!config) return;
 
-    // Helper to create mock provider
     const createMockProvider = (reason: string) => {
       console.error(`[MCP] Using mock embeddings: ${reason} (keyword-only search)`);
-      this.manager.setEmbeddingProvider({
+      manager.setEmbeddingProvider({
         model: "mock",
         embed: async (texts: string[]) => {
-          // Return random normalized vectors (BM25 keyword search still works)
           return texts.map(() => {
             const vec = Array(1536).fill(0).map(() => Math.random());
             const norm = Math.sqrt(vec.reduce((sum, v) => sum + v * v, 0));
@@ -108,19 +162,17 @@ export class MemoryMcpServer {
     if (config.provider === "openai") {
       const apiKey = config.apiKey || process.env.OPENAI_API_KEY;
 
-      // Check if API key is missing or is a test/mock value
       if (!apiKey || apiKey === "mock" || apiKey === "test" || apiKey.startsWith("mock-") || apiKey.startsWith("test-")) {
         createMockProvider("no valid API key");
         return;
       }
 
-      // Use real OpenAI provider
       const provider = createOpenAIEmbeddingProvider({
         apiKey,
         model: config.model,
       });
 
-      this.manager.setEmbeddingProvider(provider);
+      manager.setEmbeddingProvider(provider);
       console.error(`[MCP] Embedding provider: OpenAI (${config.model || "text-embedding-3-small"})`);
     } else {
       createMockProvider(`provider=${config.provider}`);
@@ -153,8 +205,12 @@ export class MemoryMcpServer {
               },
               minScore: {
                 type: "number",
-                description: "Minimum relevance score threshold 0-1 (default: 0.35)",
-                default: 0.35,
+                description: "Minimum relevance score threshold 0-1 (default: 0.15, lower works better for keyword-only search)",
+                default: 0.15,
+              },
+              userId: {
+                type: "string",
+                description: "User identifier for isolation (default: 'default')",
               },
             },
             required: ["query"],
@@ -180,6 +236,10 @@ export class MemoryMcpServer {
                 type: "number",
                 description: "Number of lines to read (optional, default: all)",
               },
+              userId: {
+                type: "string",
+                description: "User identifier for isolation (default: 'default')",
+              },
             },
             required: ["path"],
           },
@@ -201,6 +261,10 @@ export class MemoryMcpServer {
                 type: "string",
                 description: "Markdown content to write to the file",
               },
+              userId: {
+                type: "string",
+                description: "User identifier for isolation (default: 'default')",
+              },
             },
             required: ["path", "content"],
           },
@@ -218,8 +282,38 @@ export class MemoryMcpServer {
                 type: "string",
                 description: "Relative path to the file to delete (e.g., 'memory/old-notes.md')",
               },
+              userId: {
+                type: "string",
+                description: "User identifier for isolation (default: 'default')",
+              },
             },
             required: ["path"],
+          },
+        },
+        {
+          name: "memory_context",
+          description:
+            "Read or write the active working memory (scratchpad) for a user. " +
+            "The context is a JSON object stored per-user at context.json. " +
+            "Use 'get' to read current context, 'set' to shallow-merge new data into it.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              operation: {
+                type: "string",
+                enum: ["get", "set"],
+                description: "Operation to perform: 'get' reads context, 'set' merges data into it",
+              },
+              userId: {
+                type: "string",
+                description: "User identifier for isolation (default: 'default')",
+              },
+              data: {
+                type: "object",
+                description: "Data to merge into context (required for 'set' operation)",
+              },
+            },
+            required: ["operation"],
           },
         },
       ],
@@ -241,6 +335,8 @@ export class MemoryMcpServer {
               return await this.handleMemoryStore(args);
             case "memory_delete":
               return await this.handleMemoryDelete(args);
+            case "memory_context":
+              return await this.handleMemoryContext(args);
             default:
               throw new Error(`Unknown tool: ${name}`);
           }
@@ -267,10 +363,11 @@ export class MemoryMcpServer {
     const schema = z.object({
       query: z.string(),
       maxResults: z.number().optional().default(6),
-      minScore: z.number().optional().default(0.35),
+      minScore: z.number().optional().default(0.15),
+      userId: z.string().optional().default("default"),
     });
 
-    const { query, maxResults, minScore } = schema.parse(args);
+    const { query, maxResults, minScore, userId } = schema.parse(args);
 
     if (!query || query.trim().length === 0) {
       return {
@@ -284,13 +381,12 @@ export class MemoryMcpServer {
       };
     }
 
-    // Perform search
-    const results = await this.manager.search(query, {
+    const manager = await this.getOrCreateManager(userId);
+    const results = await manager.search(query, {
       maxResults,
       minScore,
     });
 
-    // Format results
     const formatted = results.map((result, idx) => ({
       rank: idx + 1,
       path: result.path,
@@ -319,31 +415,37 @@ export class MemoryMcpServer {
 
   /**
    * Handle memory_get tool call
-   * Safely reads files from the workspace directory with path traversal protection
+   * Safely reads files from the user's workspace directory with path traversal protection.
    */
   private async handleMemoryGet(args: unknown) {
     const schema = z.object({
       path: z.string(),
       from: z.number().optional(),
       lines: z.number().optional(),
+      userId: z.string().optional().default("default"),
     });
 
-    const { path, from, lines } = schema.parse(args);
+    const { path: filePath, from, lines, userId } = schema.parse(args);
 
-    const fs = await import("node:fs/promises");
-    const { resolve, normalize } = await import("node:path");
+    // Ensure user workspace exists
+    await this.getOrCreateManager(userId);
+    const userWorkspaceDir = this.getUserWorkspaceDir(userId);
 
     try {
+      const { resolve, normalize } = await import("node:path");
+
       // Normalize path and remove any ".." components
-      const safePath = normalize(path).replace(/^(\.\.(\/|\\|$))+/, '');
+      const safePath = normalize(filePath).replace(/^(\.\.(\/|\\|$))+/, "");
 
       // Resolve absolute paths
-      const workspaceAbsPath = resolve(this.workspaceDir);
+      const workspaceAbsPath = resolve(userWorkspaceDir);
       const requestedAbsPath = resolve(workspaceAbsPath, safePath);
 
-      // Security check: Ensure the resolved path is within workspace
-      if (!requestedAbsPath.startsWith(workspaceAbsPath + "/") &&
-        requestedAbsPath !== workspaceAbsPath) {
+      // Security check: Ensure the resolved path is within user workspace
+      if (
+        !requestedAbsPath.startsWith(workspaceAbsPath + "/") &&
+        requestedAbsPath !== workspaceAbsPath
+      ) {
         return {
           content: [
             {
@@ -371,7 +473,6 @@ export class MemoryMcpServer {
         };
       }
 
-      // Safe to read file
       const content = await fs.readFile(requestedAbsPath, "utf-8");
       const allLines = content.split("\n");
 
@@ -405,30 +506,32 @@ export class MemoryMcpServer {
 
   /**
    * Handle memory_store tool call
-   * Safely writes files to the workspace directory with path traversal protection
+   * Safely writes files to the user's workspace directory with path traversal protection.
    */
   private async handleMemoryStore(args: unknown) {
     const schema = z.object({
       path: z.string(),
       content: z.string(),
+      userId: z.string().optional().default("default"),
     });
 
-    const { path, content } = schema.parse(args);
+    const { path: filePath, content, userId } = schema.parse(args);
 
-    const fs = await import("node:fs/promises");
-    const { resolve, normalize, dirname } = await import("node:path");
+    const manager = await this.getOrCreateManager(userId);
+    const userWorkspaceDir = this.getUserWorkspaceDir(userId);
 
     try {
-      // Normalize path and remove any ".." components
-      const safePath = normalize(path).replace(/^(\.\.(\/|\\|$))+/, '');
+      const { resolve, normalize, dirname } = await import("node:path");
 
-      // Resolve absolute paths
-      const workspaceAbsPath = resolve(this.workspaceDir);
+      const safePath = normalize(filePath).replace(/^(\.\.(\/|\\|$))+/, "");
+      const workspaceAbsPath = resolve(userWorkspaceDir);
       const requestedAbsPath = resolve(workspaceAbsPath, safePath);
 
-      // Security check: Ensure the resolved path is within workspace
-      if (!requestedAbsPath.startsWith(workspaceAbsPath + "/") &&
-        requestedAbsPath !== workspaceAbsPath) {
+      // Security check: Ensure the resolved path is within user workspace
+      if (
+        !requestedAbsPath.startsWith(workspaceAbsPath + "/") &&
+        requestedAbsPath !== workspaceAbsPath
+      ) {
         return {
           content: [
             {
@@ -441,12 +544,29 @@ export class MemoryMcpServer {
       }
 
       // Security check: Only allow .md files
-      if (!requestedAbsPath.endsWith('.md')) {
+      if (!requestedAbsPath.endsWith(".md")) {
         return {
           content: [
             {
               type: "text",
               text: "Error: Only .md files are allowed",
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      // Indexability check: Only MEMORY.md or memory/*.md are scanned by listMemoryFiles()
+      // Storing files at any other path will write successfully but never appear in search results
+      const memorySubdir = resolve(workspaceAbsPath, "memory");
+      const isMemoryMd = requestedAbsPath === resolve(workspaceAbsPath, "MEMORY.md");
+      const isInMemoryDir = requestedAbsPath.startsWith(memorySubdir + "/");
+      if (!isMemoryMd && !isInMemoryDir) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error: Files must be stored as "MEMORY.md" or under "memory/" subdirectory (e.g. "memory/${safePath}"). Files at other paths are not indexed and will not appear in search results.`,
             },
           ],
           isError: true,
@@ -471,13 +591,12 @@ export class MemoryMcpServer {
       const dirPath = dirname(requestedAbsPath);
       await fs.mkdir(dirPath, { recursive: true });
 
-      // Write file
       await fs.writeFile(requestedAbsPath, content, "utf-8");
 
-      // Trigger memory manager to reindex the file
+      // Force reindex so search picks up the new content immediately
       try {
-        await this.manager.sync();
-        const chunkCount = this.manager.getChunkCount();
+        await manager.sync({ force: true });
+        const chunkCount = manager.getChunkCount();
         console.error(`[MCP] File saved and indexed: ${safePath} (total chunks: ${chunkCount})`);
       } catch (syncError) {
         console.error(`[MCP] Warning: File saved but indexing failed:`, syncError);
@@ -515,29 +634,31 @@ export class MemoryMcpServer {
 
   /**
    * Handle memory_delete tool call
-   * Safely deletes files from the workspace directory with path traversal protection
+   * Safely deletes files from the user's workspace directory with path traversal protection.
    */
   private async handleMemoryDelete(args: unknown) {
     const schema = z.object({
       path: z.string(),
+      userId: z.string().optional().default("default"),
     });
 
-    const { path } = schema.parse(args);
+    const { path: filePath, userId } = schema.parse(args);
 
-    const fs = await import("node:fs/promises");
-    const { resolve, normalize, basename } = await import("node:path");
+    const manager = await this.getOrCreateManager(userId);
+    const userWorkspaceDir = this.getUserWorkspaceDir(userId);
 
     try {
-      // Normalize path and remove any ".." components
-      const safePath = normalize(path).replace(/^(\.\.(\/|\\|$))+/, '');
+      const { resolve, normalize, basename } = await import("node:path");
 
-      // Resolve absolute paths
-      const workspaceAbsPath = resolve(this.workspaceDir);
+      const safePath = normalize(filePath).replace(/^(\.\.(\/|\\|$))+/, "");
+      const workspaceAbsPath = resolve(userWorkspaceDir);
       const requestedAbsPath = resolve(workspaceAbsPath, safePath);
 
-      // Security check: Ensure the resolved path is within workspace
-      if (!requestedAbsPath.startsWith(workspaceAbsPath + "/") &&
-        requestedAbsPath !== workspaceAbsPath) {
+      // Security check: Ensure the resolved path is within user workspace
+      if (
+        !requestedAbsPath.startsWith(workspaceAbsPath + "/") &&
+        requestedAbsPath !== workspaceAbsPath
+      ) {
         return {
           content: [
             {
@@ -549,7 +670,7 @@ export class MemoryMcpServer {
         };
       }
 
-      // Security check: Prevent deleting MEMORY.md (main memory file)
+      // Security check: Prevent deleting MEMORY.md
       const fileName = basename(requestedAbsPath);
       if (fileName === "MEMORY.md") {
         return {
@@ -564,7 +685,7 @@ export class MemoryMcpServer {
       }
 
       // Security check: Only allow .md files
-      if (!requestedAbsPath.endsWith('.md')) {
+      if (!requestedAbsPath.endsWith(".md")) {
         return {
           content: [
             {
@@ -591,13 +712,12 @@ export class MemoryMcpServer {
         };
       }
 
-      // Delete file
       await fs.unlink(requestedAbsPath);
 
-      // Trigger memory manager to reindex
+      // Force reindex so deleted file is removed from search index
       try {
-        await this.manager.sync();
-        const chunkCount = this.manager.getChunkCount();
+        await manager.sync({ force: true });
+        const chunkCount = manager.getChunkCount();
         console.error(`[MCP] File deleted and reindexed: ${safePath} (total chunks: ${chunkCount})`);
       } catch (syncError) {
         console.error(`[MCP] Warning: File deleted but reindexing failed:`, syncError);
@@ -633,29 +753,91 @@ export class MemoryMcpServer {
   }
 
   /**
-   * Start the MCP server with stdio transport
+   * Handle memory_context tool call
+   * Reads or shallow-merges the per-user working memory scratchpad (context.json).
+   * Layer 0 — read before any search for instant active context (<1ms).
+   */
+  private async handleMemoryContext(args: unknown) {
+    const schema = z.object({
+      operation: z.enum(["get", "set"]),
+      userId: z.string().optional().default("default"),
+      data: z.record(z.unknown()).optional(),
+    });
+
+    const { operation, userId, data } = schema.parse(args);
+
+    // Ensure user workspace exists
+    await this.getOrCreateManager(userId);
+    const userWorkspaceDir = this.getUserWorkspaceDir(userId);
+    const contextPath = path.join(userWorkspaceDir, "context.json");
+
+    if (operation === "get") {
+      try {
+        const raw = await fs.readFile(contextPath, "utf-8");
+        return {
+          content: [{ type: "text", text: raw }],
+        };
+      } catch {
+        return {
+          content: [{ type: "text", text: "{}" }],
+        };
+      }
+    } else {
+      // operation === "set"
+      if (!data) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "Error: 'data' field is required for set operation",
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      // Read existing context (empty object if missing)
+      let existing: Record<string, unknown> = {};
+      try {
+        const raw = await fs.readFile(contextPath, "utf-8");
+        existing = JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        // File doesn't exist or is invalid — start fresh
+      }
+
+      // Shallow merge new data and stamp updated_at
+      const updated = { ...existing, ...data, updated_at: new Date().toISOString() };
+      await fs.writeFile(contextPath, JSON.stringify(updated, null, 2), "utf-8");
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(updated, null, 2),
+          },
+        ],
+      };
+    }
+  }
+
+  /**
+   * Start the MCP server with stdio transport.
+   * Managers are created lazily on first tool call per user.
    */
   async start(): Promise<void> {
-    // Sync memory files before starting (index them)
-    console.error("Indexing memory files...");
-    try {
-      await this.manager.sync();
-      const chunkCount = this.manager.getChunkCount();
-      console.error(`Indexed ${chunkCount} chunks from memory files`);
-    } catch (error) {
-      console.error("Warning: Failed to sync memory files:", error instanceof Error ? error.message : error);
-    }
-
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
     console.error("Memory MCP Server started on stdio");
   }
 
   /**
-   * Close the server and cleanup resources
+   * Close the server and cleanup all manager resources.
    */
   async close(): Promise<void> {
-    await this.manager.close();
+    for (const manager of this.managers.values()) {
+      await manager.close();
+    }
+    this.managers.clear();
     await this.server.close();
   }
 }

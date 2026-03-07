@@ -133,8 +133,20 @@ export class MemoryManager {
     try {
       const files = await listMemoryFiles(this.config.workspaceDir);
 
+      // Index existing files
+      const currentRelPaths = new Set<string>();
       for (const absPath of files) {
+        const relPath = path.relative(this.config.workspaceDir, absPath);
+        currentRelPaths.add(relPath);
         await this.indexFile(absPath);
+      }
+
+      // Remove chunks from deleted files
+      const indexedPaths = this.storage.getAllFilePaths();
+      for (const indexedPath of indexedPaths) {
+        if (!currentRelPaths.has(indexedPath)) {
+          await this.deleteFile(indexedPath);
+        }
       }
 
       this.dirty = false;

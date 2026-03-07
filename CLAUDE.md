@@ -13,18 +13,123 @@ Phase 1.5-n8n: Quick Wins   ✅ COMPLETE (2026-02-06)
                             - 20 unit tests (100%) ✅
                             - 3 n8n workflows ✅
                             - Architecture docs ✅
-Phase 1.5: Vector Search    🎯 NEXT (sqlite-vec, hybrid merge)
+Phase 1.5-QA: Tests & Bugs  ✅ COMPLETE (2026-02-06)
+                            - 2 bugs fixed (sync orphans, force reindex) ✅
+                            - Integration tests (15 tests) ✅
+                            - QA scenarios (17 assertions) ✅
+                            - 140 total tests passing ✅
+Sprint 0: Multi-User        🎯 NEXT (userId isolation — CRITICAL GAP)
+Phase 1.5: Vector Search    📋 AFTER SPRINT 0 (sqlite-vec, hybrid merge)
 Phase 2: Context Management 🚧 PLANNED
 Phase 3: Session Lifecycle  📋 FUTURE
 ```
 
-**Current Focus**: Ready for Phase 1.5 (Vector Search) or n8n production testing
+**Current Focus**: Sprint 0 — Multi-User Isolation (userId per tool call)
+
+### ⚠️ CRITICAL ARCHITECTURAL GAP: Multi-User Isolation
+
+**Problema descoberto**: O sistema atual não tem isolamento por usuário.
+Todas as chamadas MCP compartilham o mesmo workspace e banco de dados.
+
+**Exemplo do problema**:
+```
+WhatsApp Bot com 100 usuários
+→ Todos escrevem no MESMO memory/
+→ Usuário A busca e encontra dados do Usuário B
+→ Zero privacidade, zero isolamento
+```
+
+**Solução planejada (Sprint 0)**:
+```
+ANTES:  memory_search({ query: "projetos" })
+DEPOIS: memory_search({ query: "projetos", userId: "user_123" })
+
+Estrutura de dados:
+{dataDir}/
+├── users/
+│   ├── user_123/
+│   │   ├── memory.db          ← DB isolado
+│   │   ├── MEMORY.md
+│   │   └── memory/*.md
+│   ├── user_456/
+│   │   ├── memory.db
+│   │   ├── MEMORY.md
+│   │   └── memory/*.md
+│   └── ...
+└── shared/                    ← (futuro) memória compartilhada
+```
+
+**Impacto**: Todas as 4 MCP tools precisam receber `userId`:
+- `memory_search({ query, userId, ... })`
+- `memory_get({ path, userId })`
+- `memory_store({ path, content, userId })`
+- `memory_delete({ path, userId })`
 
 ## Next Steps (Hybrid Approach - n8n Focus)
 
-**Strategy**: Quick wins for n8n production readiness → Vector search quality → Cloud deployment
+**Strategy**: Multi-user isolation → Vector search quality → Context management → Cloud deployment
 
-**Context**: Focus on n8n integration with local testing first, then cloud deployment.
+**Context**: Multi-user isolation é PRÉ-REQUISITO para qualquer uso em produção (WhatsApp, chatbots, etc).
+
+### Sprint 0: Multi-User Isolation 🎯 NEXT
+
+**Objetivo**: Cada usuário tem seu próprio espaço de memória isolado.
+
+**Tarefas**:
+
+1. **userId em todas as MCP tools**
+   - Arquivo: `packages/mcp-server/src/index.ts`
+   - Adicionar parâmetro `userId` (string) em memory_search, memory_get, memory_store, memory_delete
+   - Se `userId` não fornecido → usar `"default"` (backward compatible)
+
+2. **Per-user workspace**
+   - Arquivo: `packages/core/src/memory/manager.ts`
+   - Workspace muda de `{dataDir}/` para `{dataDir}/users/{userId}/`
+   - Cada userId tem seu próprio MEMORY.md e memory/*.md
+
+3. **Per-user database**
+   - Arquivo: `packages/core/src/memory/storage.ts`
+   - DB muda de `{dataDir}/memory.db` para `{dataDir}/users/{userId}/memory.db`
+   - Total isolamento — zero vazamento entre usuários
+
+4. **Testes de isolamento**
+   - User A armazena → User B não encontra
+   - User A deleta → User B não é afetado
+   - Default user funciona sem userId (backward compatible)
+
+5. **n8n Workflow com userId**
+   - WhatsApp webhook → extrair phone number como userId
+   - Passar userId em todas as chamadas MCP
+   - Exemplo: `memory_search({ query: "...", userId: "5511999999999" })`
+
+6. **Working Memory (scratchpad JSON por usuário)**
+   - Inspirado em: [memclawz QMD](https://github.com/yoniassia/memclawz) — scratchpad JSON que persiste entre sessões
+   - Arquivo: `packages/core/src/memory/working-memory.ts`
+   - Cada usuário tem `{dataDir}/users/{userId}/context.json` com estado ativo:
+     ```json
+     {
+       "session_id": "whatsapp-2026-03-01",
+       "active_topic": "Negociação contrato X",
+       "last_interaction": "2026-03-01T22:00:00Z",
+       "pending_decisions": ["Aprovar proposta?"],
+       "entities_seen": ["Empresa ABC", "João Silva"],
+       "updated_at": "2026-03-01T22:30:00Z"
+     }
+     ```
+   - Nova MCP tool: `memory_context` (read/write do scratchpad ativo)
+   - Camada 0 — lida ANTES de qualquer busca (<1ms)
+   - Agente lê context.json no início → tem contexto instantâneo sem busca
+
+**Entregáveis**:
+- [ ] userId em todas as 4 MCP tools
+- [ ] Per-user workspace e database
+- [ ] Working Memory (context.json por usuário)
+- [ ] MCP tool `memory_context` (get/set working memory)
+- [ ] Testes de isolamento (mínimo 10 tests)
+- [ ] Backward compatible (sem userId = "default")
+- [ ] Exemplo de workflow n8n com WhatsApp
+
+---
 
 ### Fase 1: Quick Wins n8n ✅ COMPLETA (2026-02-06)
 
@@ -67,7 +172,44 @@ Phase 3: Session Lifecycle  📋 FUTURE
 
 ---
 
-### Fase 2: Vector Search (2-3 semanas) 🚀 APÓS QUICK WINS
+### Fase 1.5-QA: Bug Fixes & Testing ✅ COMPLETA (2026-02-06)
+
+**Objetivo**: Corrigir bugs e criar testes de integração + QA
+
+**Bugs corrigidos**:
+
+1. ✅ **sync() não removia chunks de arquivos deletados**
+   - Arquivo: `packages/core/src/memory/storage.ts` + `manager.ts`
+   - Problema: `sync()` indexava arquivos existentes mas nunca removia chunks de deletados
+   - Fix: Adicionado `getAllFilePaths()` ao storage, sync agora compara indexados vs disco
+
+2. ✅ **memory_store/delete não reindexava**
+   - Arquivo: `packages/mcp-server/src/index.ts`
+   - Problema: `handleMemoryStore` e `handleMemoryDelete` chamavam `sync()` sem `force: true`
+   - Fix: Alterado para `sync({ force: true })` para garantir reindexação
+
+**Testes criados**:
+
+3. ✅ **Integration tests** — `packages/mcp-server/src/integration.test.ts`
+   - 15 testes end-to-end cobrindo 7 fluxos
+   - Store → Search → encontra resultado
+   - Update → Search → encontra atualizado
+   - Delete → Search → não encontra mais
+   - Segurança (path traversal, tipos inválidos)
+
+4. ✅ **QA scenarios** — `packages/mcp-server/src/qa-scenarios.ts`
+   - 4 cenários reais de usuário (assistente pessoal, suporte, notas diárias, multilingual)
+   - 17 assertions
+
+**Entregáveis**:
+- ✅ 2 bugs corrigidos
+- ✅ 15 integration tests (100% passing)
+- ✅ 17 QA assertions (100% passing)
+- ✅ 140 total tests no projeto
+
+---
+
+### Fase 2: Vector Search (2-3 semanas) 🚀 APÓS SPRINT 0
 
 **Objetivo**: Melhorar qualidade da busca (Phase 1.5 oficial)
 
@@ -93,9 +235,10 @@ Phase 3: Session Lifecycle  📋 FUTURE
    - Workflow: Upload JSONL → Submit batch → Poll → Download
    - Implementar: `batch-openai.ts`
 
-5. **Multi-Agent Isolation**
-   - DB separado por agente: `{agentId}.sqlite`
-   - Isolar memórias entre diferentes agentes
+5. **Multi-User Isolation** ✅ Movido para Sprint 0
+   - DB separado por usuário: `{dataDir}/users/{userId}/memory.db`
+   - Isolar memórias entre diferentes usuários
+   - Backward compatible: sem userId = user "default"
 
 **Entregáveis**:
 - ✅ Busca semântica funcionando
@@ -210,23 +353,23 @@ pnpm test -- --run    # Run tests without watch mode
 
 | Feature | Status | Description | Moltbot Reference |
 |---------|--------|-------------|-------------------|
+| **Multi-User Isolation** | 🎯 Sprint 0 | userId per tool, per-user DB/workspace | `{userId}.sqlite` |
 | sqlite-vec Extension | 📋 | Load vector extension | `chunks_vec` table |
 | Vector Search | 📋 | Cosine similarity | `vec_distance_cosine()` |
 | Hybrid Merge | 📋 | 70% vec + 30% keyword | `mergeHybridResults()` |
 | Embedding Batch API | 📋 | OpenAI Batch (50% cheaper) | `batch-openai.ts` |
-| Gemini Provider | 📋 | Alternative embeddings | `batch-gemini.ts` |
-| Multi-Agent Isolation | 📋 | Separate DB per agent | `{agentId}.sqlite` |
 
 ### Phase 2: Context Management 🚧 PLANNED
 
-| Feature | Status | Description | Moltbot Reference |
+| Feature | Status | Description | Reference |
 |---------|--------|-------------|-------------------|
-| Token Counting | 📋 | Measure context usage | `estimateTokensForMessages()` |
-| Context Window Guard | 📋 | Warn/block thresholds | `context-window-guard.ts` |
-| Memory Flush | 📋 | Save before compaction | `memory-flush.ts` |
-| Compaction | 📋 | Summarize old turns | `compact.ts` |
-| Soft Trim Pruning | 📋 | Keep head + tail | `pruner.ts` |
-| Hard Clear Pruning | 📋 | Replace with placeholder | `pruner.ts` |
+| Token Counting | 📋 | Measure context usage | Moltbot: `estimateTokensForMessages()` |
+| Context Window Guard | 📋 | Warn/block thresholds | Moltbot: `context-window-guard.ts` |
+| Memory Flush | 📋 | Save before compaction | Moltbot: `memory-flush.ts` |
+| Compaction | 📋 | Summarize old turns | Moltbot: `compact.ts` |
+| **Auto-Compaction** | 📋 | **Tasks concluídas → daily log → MEMORY.md** | **memclawz: `qmd-compact.py`** |
+| Soft Trim Pruning | 📋 | Keep head + tail | Moltbot: `pruner.ts` |
+| Hard Clear Pruning | 📋 | Replace with placeholder | Moltbot: `pruner.ts` |
 
 ### Phase 3: Session Lifecycle 📋 FUTURE
 
@@ -398,6 +541,33 @@ interface CompactionResult {
   tokensBefore: number;      // 182000
   tokensAfter: number;       // 55000
   compressionRatio: number;  // 0.30 (70% savings)
+}
+```
+
+### Auto-Compaction (inspirado em memclawz)
+
+Lógica de compactação automática do working memory:
+
+```typescript
+// Ref: https://github.com/yoniassia/memclawz (scripts/qmd-compact.py)
+//
+// Fluxo de compactação:
+// 1. context.json (working memory) → tasks concluídas movem para daily log
+// 2. Daily logs antigos → resumidos e arquivados no MEMORY.md
+// 3. context.json mantém apenas tasks ativas
+
+interface AutoCompactionConfig {
+  enabled: boolean;
+  archiveCompletedAfterHours: number;  // 24h — move completed to daily log
+  summarizeDailyLogsAfterDays: number; // 7d — summarize old daily logs
+  maxActiveItems: number;              // 10 — max items in context.json
+}
+
+function autoCompact(userId: string, config: AutoCompactionConfig): CompactionResult {
+  // 1. Read context.json
+  // 2. Move completed items → memory/YYYY-MM-DD.md
+  // 3. Summarize old daily logs → append to MEMORY.md
+  // 4. Save cleaned context.json with active items only
 }
 ```
 
