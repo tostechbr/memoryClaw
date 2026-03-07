@@ -1,5 +1,5 @@
 /**
- * Core types for Akashic Context
+ * Core types for MemoryClaw
  */
 
 // ============================================

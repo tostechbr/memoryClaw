@@ -2,7 +2,7 @@
 # MCP Server wrapper for n8n
 # Usage: ./run-server.sh
 
-WORKSPACE="/Users/tiago.santos/Documents/GitHub/memory-context-engine/test-workspace-mcp"
+WORKSPACE="/Users/tiago.santos/Documents/GitHub/memory-claw/test-workspace-mcp"
 DB_PATH="${WORKSPACE}/memory.db"
 
 # Remove old database to force reindex

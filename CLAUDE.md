@@ -1,4 +1,4 @@
-# Akashic Context
+# MemoryClaw
 
 Open-source library for adding persistent memory and context management to AI agents.
 
@@ -33,6 +33,12 @@ Sprint 1: Vector Search     ✅ COMPLETE (2026-03-07)
                             - memory_add tool (LLM extract + merge) ✅
                             - extractionModel configurable (default: gpt-4o-mini) ✅
                             - 149 total tests passing (10 new math + 4 memory_add) ✅
+Sprint 1 E2E Validation     ✅ COMPLETE (2026-03-07)
+                            - n8n webhook workflow validated end-to-end ✅
+                            - 11/11 e2e scenarios passing ✅
+                            - Workflow JSON exported: examples/n8n-memory-claw-memory-test.json ✅
+                            - Test script: tests/e2e/webhook-scenarios.sh ✅
+                            - Fix: MCP Client toolDescription with explicit param schemas ✅
 Sprint 2: Context Management 🎯 NEXT
 Phase 3: Session Lifecycle  📋 FUTURE
 ```
@@ -61,11 +67,11 @@ Estrutura de dados implementada:
 Todas as 4 MCP tools aceitam `userId` opcional (default: `"default"`).
 Nova tool `memory_context` para get/set do scratchpad JSON por sessão.
 
-## Next Steps (Sprint 1 Focus)
+## Next Steps (Sprint 2 Focus)
 
-**Strategy**: Vector search quality → Context management → Cloud deployment
+**Strategy**: Vector search ✅ → Context management 🎯 → Cloud deployment
 
-**Context**: Sprint 0 ✅ completo. Próximo bloqueio de qualidade: busca semântica.
+**Context**: Sprint 1 ✅ completo e validado via n8n e2e. Próximo: Sprint 2 — gerenciar tokens, compactar contexto, pruning.
 
 ### Sprint 0: Multi-User Isolation ✅ COMPLETA (2026-03-06)
 
@@ -73,39 +79,33 @@ Ver seção "RESOLVED: Multi-User Isolation" acima. Todos os entregáveis implem
 
 ---
 
-### Sprint 1: Vector Search 🎯 NEXT
+### Sprint 1: Vector Search ✅ COMPLETA (2026-03-07)
 
 **Objetivo**: Busca semântica — encontrar por significado, não só por palavras-chave.
 
-**Tarefas**:
-
-1. **Carregar sqlite-vec**
-   - Arquivo: `packages/core/src/memory/storage.ts`
-   - Resolver carregamento do `vec0.dylib` por plataforma (macOS/Linux)
-
-2. **Vector search end-to-end**
-   - Garantir que embeddings vão para `chunks_vec`
-   - `searchVector()` retorna resultados por cosine similarity
-
-3. **Validar hybrid merge**
-   - Query semântica encontra o que keyword não encontra
-   - Testes com dados reais (query ≠ texto literal)
-
-4. **memory_add tool (Mem0-like)**
-   - Nova MCP tool: extrai fatos da conversa via LLM e salva automaticamente
-   - Input: `{ message, userId }` → LLM extrai → salva em `memory/`
-   - Diferencial vs. `memory_store` manual
-
-5. **Testes de busca semântica**
-   - Benchmark: vector > keyword em 10 queries de teste
-   - Validar hybrid merge (70% vec + 30% keyword)
-
 **Entregáveis**:
-- [ ] sqlite-vec carregando em macOS e Linux
-- [ ] Busca vetorial retornando resultados relevantes
-- [ ] Hybrid merge > keyword-only em benchmark
-- [ ] `memory_add` tool funcionando via n8n
-- [ ] Testes matemáticos validados
+- ✅ `cosineSimilarity()` + `searchVectorInProcess()` implementados
+- ✅ Hybrid merge (70% vec + 30% keyword) funcionando
+- ✅ `memory_add` tool (LLM extraction + deduplication by cosine threshold 0.50)
+- ✅ 149 testes passando (10 matemáticos + 4 memory_add)
+- ✅ Validado end-to-end via n8n webhook (11/11 cenários)
+- ✅ Workflow exportado: `examples/n8n-memory-claw-memory-test.json`
+
+**n8n Setup Validado** (para reproduzir):
+```
+Webhook POST /webhook/teste
+  → AI Agent (gpt-4.1-mini)
+  → MCP Client (STDIO → memory-mcp-server)
+  → Respond to Webhook
+
+MCP Client Tool Description (crítico — define o schema para o LLM):
+  - memory_search: {"query": "string", "userId": "tiago_123"}
+  - memory_add:    {"message": "string", "userId": "tiago_123"}
+  - memory_get:    {"path": "string", "userId": "tiago_123"}
+  - memory_delete: {"path": "string", "userId": "tiago_123"}
+
+cosine maxDistance: 0.50 (ajustado para português — distâncias ~0.40-0.55)
+```
 
 ---
 
@@ -296,7 +296,7 @@ packages/
 │       ├── memory/          # Memory system
 │       │   ├── chunking.ts  # Markdown chunking (~400 tokens, 80 overlap)
 │       │   ├── hybrid.ts    # Hybrid search (BM25 + Vector)
-│       │   ├── storage.ts   # SQLite + FTS5 + embedding_cache
+│       │   ├── storage.ts   # SQLite + FTS5 + embedding_cache + searchVectorInProcess()
 │       │   ├── manager.ts   # Memory Manager
 │       │   └── providers/   # Embedding providers
 │       │       ├── index.ts
@@ -305,10 +305,19 @@ packages/
 │       ├── types.ts         # Core type definitions
 │       └── index.ts         # Main exports
 │
-└── mcp-server/              # MCP Server adapter
-    └── src/
-        ├── index.ts         # MCP Server implementation
-        └── cli.ts           # CLI entry point
+├── mcp-server/              # MCP Server adapter
+│   └── src/
+│       ├── index.ts         # MCP Server (memory_search, memory_get, memory_store,
+│       │                    #   memory_delete, memory_context, memory_add)
+│       └── cli.ts           # CLI entry point (runs dist/cli.js)
+│
+examples/
+├── n8n-memory-claw-memory-test.json   # ← Webhook + AI Agent + MCP Client workflow (Sprint 1 validated)
+└── README.md                      # Setup instructions
+│
+tests/
+└── e2e/
+    └── webhook-scenarios.sh       # ← 7 cenários e2e (11 assertions) via curl
 ```
 
 ## Commands
@@ -703,8 +712,9 @@ npm run build-release
 
 ### Vector search not working
 
-sqlite-vec extension not loaded. Currently only keyword search works.
-Phase 1.5 will add: `db.loadExtension('/path/to/vec0.dylib')`
+`searchVectorInProcess()` usa embeddings armazenados no SQLite e cosine similarity em memória.
+Verifique se `OPENAI_API_KEY` está setada (necessária para gerar embeddings).
+Ajuste `maxDistance` se não retornar resultados — para português, use `0.50` (padrão ajustado no Sprint 1).
 
 ### Search returns 0 results
 
@@ -716,7 +726,7 @@ Phase 1.5 will add: `db.loadExtension('/path/to/vec0.dylib')`
 
 ## Links
 
-- **Repo**: https://github.com/tostechbr/akashic-context
+- **Repo**: https://github.com/tostechbr/memory-claw
 - **Docs**: [README.md](./README.md)
 - **Testing**: [docs/TESTING.md](./docs/TESTING.md)
 - **MCP Protocol**: https://modelcontextprotocol.io

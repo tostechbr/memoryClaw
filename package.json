@@ -1,11 +1,11 @@
 {
-  "name": "akashic-context-monorepo",
+  "name": "memory-claw-monorepo",
   "version": "0.0.1",
   "private": true,
   "description": "Universal Memory & Context Engine for LLMs",
   "repository": {
     "type": "git",
-    "url": "https://github.com/tostechbr/akashic-context.git"
+    "url": "https://github.com/tostechbr/memory-claw.git"
   },
   "author": "Tiago Santos",
   "license": "MIT",

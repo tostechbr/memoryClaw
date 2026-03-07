@@ -1,5 +1,5 @@
 {
-  "name": "akashic-context",
+  "name": "memory-claw",
   "version": "0.1.0",
   "description": "Universal Memory & Context Engine for LLMs",
   "main": "./dist/index.js",

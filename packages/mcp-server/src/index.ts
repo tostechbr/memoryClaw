@@ -9,7 +9,7 @@ import {
   MemoryManager,
   createOpenAIEmbeddingProvider,
   type EmbeddingProvider
-} from "akashic-context";
+} from "memory-claw";
 import { z } from "zod";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -38,7 +38,7 @@ export interface McpServerConfig {
 }
 
 /**
- * MCP Server for Akashic Context
+ * MCP Server for MemoryClaw
  * Exposes memory search and retrieval tools via Model Context Protocol
  * Supports per-user isolation via optional userId parameter on all tools.
  */
@@ -61,7 +61,7 @@ export class MemoryMcpServer {
     // Initialize MCP Server
     this.server = new Server(
       {
-        name: "akashic-context",
+        name: "memory-claw",
         version: "0.1.0",
       },
       {

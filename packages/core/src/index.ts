@@ -1,5 +1,5 @@
 /**
- * Akashic Context
+ * MemoryClaw
  * Universal Memory & Context Management for LLMs
  */
 

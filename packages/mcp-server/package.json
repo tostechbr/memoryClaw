@@ -1,7 +1,7 @@
 {
-  "name": "@akashic-context/mcp-server",
+  "name": "@memory-claw/mcp-server",
   "version": "0.1.0",
-  "description": "MCP Server adapter for akashic-context",
+  "description": "MCP Server adapter for memory-claw",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -19,7 +19,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
-    "akashic-context": "workspace:*",
+    "memory-claw": "workspace:*",
     "zod": "^3.23.0"
   },
   "devDependencies": {

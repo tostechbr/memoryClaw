@@ -57,7 +57,7 @@ setTimeout(() => {
       name: "memory_store",
       arguments: {
         path: "memory/test-2026-02-06.md",
-        content: "# Test Memory\n\nThis is a test memory created on 2026-02-06.\n\n## Topics\n- memory_store tool testing\n- n8n integration\n- Akashic Context development"
+        content: "# Test Memory\n\nThis is a test memory created on 2026-02-06.\n\n## Topics\n- memory_store tool testing\n- n8n integration\n- MemoryClaw development"
       }
     }
   }) + '\n');

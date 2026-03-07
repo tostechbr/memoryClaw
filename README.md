@@ -1,6 +1,6 @@
 <div align="center">
 
-# Akashic Context
+# MemoryClaw
 
 **Universal Memory & Context Engine for LLMs**
 
@@ -10,15 +10,15 @@
 
 </div>
 
-> "Akashic Context" implies a universal, infinite context for your AI.
+> "MemoryClaw" implies a universal, infinite context for your AI.
 
-Akashic Context is an open-source library that adds **persistent memory** and **intelligent context management** to AI agents. Your agents can remember past conversations, decisions, and context across sessions - while automatically managing token limits.
+MemoryClaw is an open-source library that adds **persistent memory** and **intelligent context management** to AI agents. Your agents can remember past conversations, decisions, and context across sessions - while automatically managing token limits.
 
 ## The Vision
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    AKASHIC CONTEXT                          │
+│                      MEMORYCLAW                     │
 │                                                             │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
 │  │   Memory    │  │   Context   │  │   Session   │         │
@@ -53,8 +53,8 @@ Akashic Context is an open-source library that adds **persistent memory** and **
 ### 1. Clone and Build
 
 ```bash
-git clone https://github.com/tostechbr/akashic-context.git
-cd akashic-context
+git clone https://github.com/tostechbr/memory-claw.git
+cd memory-claw
 pnpm install
 pnpm build
 ```
@@ -79,7 +79,7 @@ Example `MEMORY.md`:
 I'm a developer working on AI projects.
 
 ## Current Projects
-- Akashic Context - Adding memory to AI agents
+- MemoryClaw - Adding memory to AI agents
 - My App - A productivity tool
 
 ## Important Contacts
@@ -117,9 +117,9 @@ WORKSPACE="/path/to/your/my-workspace"
 
 | Field | Value |
 |-------|-------|
-| Name | `Akashic Context` |
+| Name | `MemoryClaw` |
 | Command | `bash` |
-| Arguments | `/absolute/path/to/akashic-context/packages/mcp-server/run-server.sh` |
+| Arguments | `/absolute/path/to/memory-claw/packages/mcp-server/run-server.sh` |
 | Environments | `OPENAI_API_KEY=sk-your-actual-key` |
 
 4. Click **Save**
@@ -132,7 +132,7 @@ Create a new workflow in n8n and import this JSON:
 
 ```json
 {
-  "name": "Akashic Memory Test",
+  "name": "MemoryClaw Memory Test",
   "nodes": [
     {
       "parameters": {
@@ -188,7 +188,7 @@ Create a new workflow in n8n and import this JSON:
       "credentials": {
         "mcpApi": {
           "id": "your-mcp-credential",
-          "name": "Akashic Context"
+          "name": "MemoryClaw"
         }
       }
     }
@@ -210,7 +210,7 @@ Create a new workflow in n8n and import this JSON:
 **After importing:**
 
 1. Open the **OpenAI Chat Model** node and select your OpenAI credential
-2. Open the **MCP Client** node and select your Akashic Context credential
+2. Open the **MCP Client** node and select your MemoryClaw credential
 3. Save the workflow
 4. Activate the workflow (toggle in top-right)
 
@@ -447,7 +447,7 @@ Contributions are welcome! We especially need help with:
 ## Project Structure
 
 ```
-akashic-context/
+memory-claw/
 ├── packages/
 │   ├── core/           # Core library (search, storage, chunking)
 │   └── mcp-server/     # MCP Server for AI agents

@@ -80,7 +80,7 @@ describe("Integration: End-to-End Memory Flows", () => {
       // Store file 1
       await server["handleMemoryStore"]({
         path: "memory/projects.md",
-        content: "# Projects\n\n## Akashic Context\nMemory engine for AI agents.",
+        content: "# Projects\n\n## MemoryClaw\nMemory engine for AI agents.",
       });
 
       // Store file 2
@@ -91,7 +91,7 @@ describe("Integration: End-to-End Memory Flows", () => {
 
       // Search across both
       const r1 = parseResponse(
-        await server["handleMemorySearch"]({ query: "Akashic", minScore: 0 })
+        await server["handleMemorySearch"]({ query: "MemoryClaw", minScore: 0 })
       );
       expect(r1.data.resultCount).toBeGreaterThan(0);
 

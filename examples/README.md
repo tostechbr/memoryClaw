@@ -1,6 +1,6 @@
 # n8n Workflow Examples
 
-Complete workflow examples demonstrating Akashic Context integration with n8n.
+Complete workflow examples demonstrating MemoryClaw integration with n8n.
 
 ## Prerequisites
 
@@ -12,9 +12,9 @@ Complete workflow examples demonstrating Akashic Context integration with n8n.
 
 2. **Configure MCP Credential**
    - Go to Credentials → Create New → MCP API
-   - Name: `Akashic Context`
+   - Name: `MemoryClaw`
    - Command: `bash`
-   - Arguments: `/absolute/path/to/akashic-context/packages/mcp-server/run-server.sh`
+   - Arguments: `/absolute/path/to/memory-claw/packages/mcp-server/run-server.sh`
    - Environments: `OPENAI_API_KEY=sk-your-key`
 
 3. **Configure OpenAI Credential**
@@ -184,4 +184,4 @@ Create a scheduled workflow that runs daily:
 
 - **Documentation**: [README.md](../README.md)
 - **Testing Guide**: [TESTING.md](../docs/TESTING.md)
-- **Issues**: https://github.com/tostechbr/akashic-context/issues
+- **Issues**: https://github.com/tostechbr/memory-claw/issues
