@@ -18,6 +18,12 @@ WEBHOOK_URL="${WEBHOOK_URL:-http://localhost:5678/webhook/teste}"
 TIMEOUT="${TIMEOUT:-60}"
 USER_A="user_test_a"
 USER_B="user_test_b"
+DATA_DIR="$(cd "$(dirname "$0")/../.." && pwd)/packages/mcp-server/data"
+
+# ── Pre-test cleanup (idempotent — safe to run multiple times) ──────────
+echo -e "${YELLOW}Cleaning test user data...${NC}"
+rm -rf "$DATA_DIR/users/$USER_A" "$DATA_DIR/users/$USER_B"
+mkdir -p "$DATA_DIR/users"
 PASS=0
 FAIL=0
 TOTAL=0

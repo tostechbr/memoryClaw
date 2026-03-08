@@ -52,3 +52,10 @@ article/
 *.db
 *.db-shm
 *.db-wal
+
+# User memory data (privacy — never commit personal memories)
+packages/mcp-server/data/users/
+!packages/mcp-server/data/.gitkeep
+test-workspace-mcp/users/
+test-workspace-mcp/memory/
+test-workspace-mcp/MEMORY.md

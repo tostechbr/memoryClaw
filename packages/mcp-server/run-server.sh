@@ -1,15 +1,16 @@
 #!/bin/bash
 # MCP Server wrapper for n8n
 # Usage: ./run-server.sh
+#
+# The workspace defaults to packages/mcp-server/data/
+# Override with: MEMORY_WORKSPACE_DIR=/path/to/dir ./run-server.sh
 
-WORKSPACE="/Users/tiago.santos/Documents/GitHub/memory-claw/test-workspace-mcp"
-DB_PATH="${WORKSPACE}/memory.db"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+WORKSPACE="${MEMORY_WORKSPACE_DIR:-$SCRIPT_DIR/data}"
 
-# Remove old database to force reindex
-rm -f "$DB_PATH"
+mkdir -p "$WORKSPACE"
 
-cd "$(dirname "$0")/../.."
+cd "$SCRIPT_DIR/../.."
 
 exec node packages/mcp-server/dist/cli.js \
-  --workspace="$WORKSPACE" \
-  --db="$DB_PATH"
+  --workspace="$WORKSPACE"

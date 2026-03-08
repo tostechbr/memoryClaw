@@ -1,0 +1,89 @@
+{
+  "name": "MemoryClaw SDR Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Prospect message: {{ $json.body.message }}\nprospectId: {{ $json.body.userId ?? 'anonymous' }}",
+        "options": {
+          "systemMessage": "You are an SDR (Sales Development Representative) for MemoryClaw, a persistent memory engine for AI agents.\n\nYour goal: qualify prospects, understand their pain points, and schedule a demo.\n\nBefore EVERY response:\n  1. Use memory_search to retrieve what you know about this prospect\n  2. Use that context to personalize your response (don't ask what you already know)\n\nWhen the prospect shares ANY information (name, company, role, team size, current tools, pain points, budget, timeline):\n  1. Use memory_add to save it immediately\n  2. Naturally continue the conversation\n\nQualification framework (BANT — gather over time, not all at once):\n  - Budget: Can they invest in a solution?\n  - Authority: Are they a decision maker?\n  - Need: What problem are they solving?\n  - Timeline: When do they want to implement?\n\nTone: Consultative, curious, helpful. Never pushy.\nAlways respond in the same language the prospect uses.\nAlways use the prospectId provided in the message as userId for memory tools."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [448, -96],
+      "id": "sdr-agent-node",
+      "name": "SDR Agent"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [400, 96],
+      "id": "sdr-llm-node",
+      "name": "OpenAI Chat Model"
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "MemoryClaw memory tools for prospect context. Parameters for each tool:\n  - memory_search: {\"query\": \"string\", \"userId\": \"<prospectId from message>\"}\n  - memory_add:    {\"message\": \"string\", \"userId\": \"<prospectId from message>\"}\n  - memory_get:    {\"path\": \"string\", \"userId\": \"<prospectId from message>\"}\n  - memory_delete: {\"path\": \"string\", \"userId\": \"<prospectId from message>\"}\nAlways use the prospectId from the message as userId.",
+        "operation": "executeTool",
+        "toolName": "={{ $fromAI('tool_name', 'Name of the MCP tool: memory_search, memory_add, memory_get, or memory_delete') }}",
+        "toolParameters": "={{ $fromAI('tool_parameters', 'JSON object with tool parameters. Use prospectId as userId. Example: {\"query\": \"company pain points\", \"userId\": \"prospect_abc\"}') }}"
+      },
+      "type": "n8n-nodes-mcp.mcpClientTool",
+      "typeVersion": 1,
+      "position": [608, 96],
+      "id": "sdr-mcp-node",
+      "name": "MCP Client"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "sdr",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [160, -96],
+      "id": "sdr-webhook-node",
+      "name": "Webhook"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [864, -96],
+      "id": "sdr-respond-node",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "connections": {
+    "SDR Agent": {
+      "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [[{ "node": "SDR Agent", "type": "ai_languageModel", "index": 0 }]]
+    },
+    "MCP Client": {
+      "ai_tool": [[{ "node": "SDR Agent", "type": "ai_tool", "index": 0 }]]
+    },
+    "Webhook": {
+      "main": [[{ "node": "SDR Agent", "type": "main", "index": 0 }]]
+    }
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}
